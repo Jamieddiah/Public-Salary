@@ -235,6 +235,24 @@ tr:hover td { background: #f8fafc; }
 .empty-state { text-align: center; padding: 48px; color: var(--text-light); }
 .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
 .empty-state p { font-size: 14px; }
+
+/* Carrière / Avancement */
+.carriere-row { transition: background .2s; }
+.carriere-row.disabled { background: #E5E7EB !important; opacity: .55; }
+.carriere-row.disabled td { color: #9CA3AF; }
+.carriere-row.traite td { background: #F0FDF4; }
+.carriere-row .acte-input { width: 180px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; font-size: 12px; }
+.carriere-row .acte-input:disabled { background: #F3F4F6; cursor: not-allowed; }
+.carriere-row .cb-traiter { width: 18px; height: 18px; cursor: pointer; accent-color: var(--green); }
+.carriere-row .cb-traiter:disabled { cursor: not-allowed; accent-color: #9CA3AF; }
+.badge-titularisation { background: #DBEAFE; color: #1E40AF; }
+.badge-validation { background: #FEF3C7; color: #92400E; }
+.badge-avancement { background: #EDE9FE; color: #5B21B6; }
+.carriere-legend { display: flex; gap: 16px; margin-bottom: 16px; font-size: 12px; align-items: center; }
+.carriere-legend .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; margin-right: 4px; }
+.service-row { display: flex; gap: 12px; align-items: flex-end; margin-bottom: 8px; }
+.service-row .form-group-sm { flex: 1; margin-bottom: 0; }
+.service-row button { flex-shrink: 0; margin-bottom: 0; }
 </style>
 </head>
 <body>
@@ -312,6 +330,7 @@ const NAV_ITEMS = [
     { id: 'agents', icon: '👥', label: 'Agents' },
     { id: 'grilles', icon: '📋', label: 'Grilles indiciaires' },
     { id: 'evs', icon: '📝', label: 'Éléments variables' },
+    { id: 'carriere', icon: '🎖️', label: 'Avancement & Validation' },
     { id: 'calcul', icon: '💰', label: 'Calcul de paie' },
     { id: 'masse-salariale', icon: '📈', label: 'Masse salariale' },
     { id: 'parametres', icon: '⚙️', label: 'Paramètres', admin: true },
@@ -415,7 +434,7 @@ function buildNav() {
 
 function navigate(page) {
     currentPage = page;
-    const titles = { dashboard:'Tableau de bord', organigramme:'Organigramme', agents:'Gestion des agents', grilles:'Grilles indiciaires', evs:'Éléments variables', calcul:'Calcul de paie', 'masse-salariale':'Rapport masse salariale', parametres:'Paramètres' };
+    const titles = { dashboard:'Tableau de bord', organigramme:'Organigramme', agents:'Gestion des agents', grilles:'Grilles indiciaires', evs:'Éléments variables', carriere:'Avancement & Validation', calcul:'Calcul de paie', 'masse-salariale':'Rapport masse salariale', parametres:'Paramètres' };
     document.getElementById('page-title').textContent = titles[page] || page;
     buildNav();
     renderPage();
@@ -430,6 +449,7 @@ function renderPage() {
         case 'agents': renderAgents(c); break;
         case 'grilles': renderGrilles(c); break;
         case 'evs': renderEVS(c); break;
+        case 'carriere': renderCarriere(c); break;
         case 'calcul': renderCalcul(c); break;
         case 'masse-salariale': renderMasseSalariale(c); break;
         case 'parametres': renderParametres(c); break;
@@ -909,6 +929,370 @@ async function validerEVS(id, action) {
     if (commentaire === null) return;
     const res = await api('POST', `/evs/${id}/valider`, { action, commentaire });
     if (res) { toast(res.message); renderEVS(document.getElementById('content')); }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   5b. CARRIÈRE — AVANCEMENT & VALIDATION
+   ═══════════════════════════════════════════════════════════════ */
+
+async function renderCarriere(c) {
+    c.innerHTML = `
+        <div class="card" style="margin-bottom:20px">
+            <div class="card-header">
+                <span class="card-title">Traitement des avancements</span>
+                <button class="btn btn-success btn-sm" onclick="openMiseEnSolde()">+ Mise en solde</button>
+            </div>
+            <div class="filter-bar">
+                <input type="text" id="carr-matricule" placeholder="Matricule (ex: SN010001)" style="min-width:220px">
+                <button class="btn btn-primary" onclick="chargerCarriere()">🔍 Charger carrière</button>
+            </div>
+        </div>
+        <div id="carriere-result">
+            <div class="empty-state"><div class="icon">🎖️</div><p>Saisissez un matricule pour afficher la carrière de l'agent.<br><small>L'agent doit d'abord être mis en solde.</small></p></div>
+        </div>`;
+}
+
+async function chargerCarriere() {
+    const matricule = document.getElementById('carr-matricule').value.trim().toUpperCase();
+    if (!matricule) { toast('Saisissez un matricule', 'error'); return; }
+
+    const r = document.getElementById('carriere-result');
+    r.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+    const data = await api('GET', `/carriere/agent/matricule/${matricule}`);
+    if (!data) { r.innerHTML = ''; return; }
+
+    if (!data.mise_en_solde) {
+        r.innerHTML = `<div class="card"><div class="empty-state"><div class="icon">⚠️</div>
+            <p>L'agent <strong>${data.agent.matricule} — ${data.agent.nom} ${data.agent.prenom}</strong> n'a pas encore été mis en solde.</p>
+            <button class="btn btn-success" style="margin-top:12px" onclick="openMiseEnSolde(${data.agent.id})">Mise en solde</button>
+        </div></div>`;
+        return;
+    }
+
+    const a = data.agent;
+    const mes = data.mise_en_solde;
+    const aujourdhui = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+
+    // Légende
+    let totalValidation = 0;
+    if (data.validations) {
+        totalValidation = data.validations.reduce((s, v) => s + v.duree_jours, 0);
+    }
+
+    let servicesHtml = '';
+    if (data.validations && data.validations.length > 0) {
+        servicesHtml = `<div style="margin-bottom:12px">
+            <strong>Services antérieurs validés :</strong>
+            ${data.validations.map(v => `<span class="badge badge-contractuel" style="margin-left:6px">${v.type_service} (${v.duree_jours} j.)</span>`).join('')}
+            <span style="margin-left:8px;font-weight:600">Total : ${totalValidation} jours = ${(totalValidation/360).toFixed(1)} ans</span>
+        </div>`;
+    }
+
+    let html = `
+        <div class="card">
+            <div class="card-header">
+                <span class="card-title">Carrière de ${a.nom} ${a.prenom} — ${a.matricule}</span>
+                <span style="font-size:13px;color:var(--text-light)">Date du jour : <strong>${fmtDate(aujourdhui)}</strong></span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px;font-size:13px">
+                <div><strong>Statut :</strong> ${badgeStatut(a.statut)}</div>
+                <div><strong>Corps :</strong> ${a.corps}</div>
+                <div><strong>Titularisé le :</strong> ${fmtDate(mes.date_titularisation)}</div>
+                <div><strong>Position initiale :</strong> ${mes.classe_initiale} éch.${mes.echelon_initial}</div>
+                <div><strong>Indice initial :</strong> ${mes.indice_initial}</div>
+                <div><strong>Ministère :</strong> ${a.ministere_nom || ''}</div>
+            </div>
+            ${servicesHtml}
+            <div class="carriere-legend">
+                <span><span class="dot" style="background:#2563EB"></span> Titularisation</span>
+                <span><span class="dot" style="background:#D97706"></span> Validation</span>
+                <span><span class="dot" style="background:#7C3AED"></span> Avancement</span>
+                <span><span class="dot" style="background:#E5E7EB"></span> Futur (non traitable)</span>
+                <span><span class="dot" style="background:#D1FAE5"></span> Traité</span>
+            </div>
+            <form id="carriere-form" onsubmit="soumettreTraitements(event, ${a.id})">
+                <table>
+                    <tr>
+                        <th style="width:40px">✓</th>
+                        <th>Rang</th>
+                        <th>Classe</th>
+                        <th>Échelon</th>
+                        <th>Indice</th>
+                        <th>Salaire base</th>
+                        <th>Date d'effet</th>
+                        <th>Type</th>
+                        <th>Référence de l'acte</th>
+                        <th>Statut</th>
+                    </tr>`;
+
+    for (const e of data.carriere) {
+        const estFutur = e.date_effet > aujourdhui;
+        const estTraite = e.traite === 1;
+        const desactive = estFutur || estTraite;
+        const rowClass = estFutur ? 'carriere-row disabled' : estTraite ? 'carriere-row traite' : 'carriere-row';
+        const salaireBase = fmt(e.indice * 475);
+
+        let badgeMvt = '';
+        if (e.type_mouvement === 'titularisation') badgeMvt = '<span class="badge badge-titularisation">Titularisation</span>';
+        else if (e.type_mouvement === 'validation') badgeMvt = '<span class="badge badge-validation">Validation</span>';
+        else badgeMvt = '<span class="badge badge-avancement">Avancement</span>';
+
+        let statutCell = '';
+        if (estTraite) {
+            statutCell = `<span class="badge badge-visa">Traité</span>`;
+        } else if (estFutur) {
+            statutCell = `<span style="color:#9CA3AF;font-size:12px">Non échu</span>`;
+        } else {
+            statutCell = `<span class="badge badge-en_attente">À traiter</span>`;
+        }
+
+        html += `
+            <tr class="${rowClass}">
+                <td style="text-align:center">
+                    <input type="checkbox" class="cb-traiter" data-id="${e.id}" ${desactive ? 'disabled' : ''}
+                        ${estTraite ? 'checked' : ''}>
+                </td>
+                <td>${e.rang}</td>
+                <td><strong>${e.classe}</strong></td>
+                <td>${e.echelon}</td>
+                <td><strong>${e.indice}</strong></td>
+                <td>${salaireBase} FCFA</td>
+                <td style="${estFutur ? 'color:#9CA3AF' : 'font-weight:600'}">${fmtDate(e.date_effet)}</td>
+                <td>${badgeMvt}</td>
+                <td>
+                    <input type="text" class="acte-input" data-id="${e.id}"
+                        value="${e.reference_acte || ''}"
+                        placeholder="${desactive ? '' : 'Réf. acte...'}"
+                        ${desactive ? 'disabled' : ''}>
+                </td>
+                <td>${statutCell}</td>
+            </tr>`;
+    }
+
+    html += `
+                </table>
+                <div style="margin-top:16px;display:flex;justify-content:flex-end;gap:12px">
+                    <button type="submit" class="btn btn-primary">💾 Enregistrer les traitements</button>
+                </div>
+            </form>
+        </div>`;
+
+    r.innerHTML = html;
+}
+
+async function soumettreTraitements(event, agentId) {
+    event.preventDefault();
+
+    const checkboxes = document.querySelectorAll('.cb-traiter:checked:not(:disabled)');
+    if (checkboxes.length === 0) {
+        // Chercher les nouvellement cochées (pas disabled = pas déjà traitées ni futures)
+        const newChecked = document.querySelectorAll('.cb-traiter:checked');
+        let traitements = [];
+        newChecked.forEach(cb => {
+            if (!cb.disabled || cb.closest('tr').classList.contains('traite')) return;
+        });
+    }
+
+    // Collecter les traitements cochés (non déjà traités)
+    const allCb = document.querySelectorAll('.cb-traiter');
+    let traitements = [];
+    allCb.forEach(cb => {
+        const tr = cb.closest('tr');
+        if (cb.checked && !tr.classList.contains('traite') && !tr.classList.contains('disabled')) {
+            const id = parseInt(cb.dataset.id);
+            const acteInput = tr.querySelector('.acte-input');
+            traitements.push({
+                carriere_id: id,
+                reference_acte: acteInput ? acteInput.value : ''
+            });
+        }
+    });
+
+    if (traitements.length === 0) {
+        toast('Aucun avancement à traiter sélectionné', 'error');
+        return;
+    }
+
+    const res = await api('POST', '/carriere/traiter-batch', { traitements });
+    if (res) {
+        toast(`${res.total_traites} avancement(s) traité(s)`);
+        if (res.erreurs && res.erreurs.length > 0) {
+            toast(`${res.total_erreurs} erreur(s): ${res.erreurs[0].error}`, 'error');
+        }
+        // Recharger
+        chargerCarriere();
+    }
+}
+
+/* ── Mise en solde (modal) ──────────────────────────────────────── */
+
+async function openMiseEnSolde(agentId) {
+    // Charger agents et grille de progression
+    const agentsData = await api('GET', '/agents?per_page=100');
+    if (!agentsData) return;
+
+    const statuts = ['titulaire', 'contractuel', 'militaire', 'gendarmerie', 'police'];
+
+    openModal(`
+        <div class="modal-header"><h2>Mise en solde d'un agent</h2><button class="modal-close" onclick="closeModal()">×</button></div>
+        <form onsubmit="executerMiseEnSolde(event)">
+            <div class="form-row">
+                <div class="form-group-sm"><label>Agent</label>
+                    <select id="mes-agent" required onchange="mesClearCorps()">
+                        <option value="">-- Choisir --</option>
+                        ${agentsData.agents.map(a => `<option value="${a.id}" data-statut="${a.statut}" data-corps="${a.corps}" ${agentId && a.id==agentId?'selected':''}>${a.matricule} — ${a.nom} ${a.prenom} (${a.statut})</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group-sm"><label>Date de titularisation</label>
+                    <input type="date" id="mes-date" required>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group-sm"><label>Statut</label>
+                    <select id="mes-statut" onchange="mesLoadCorps()">
+                        ${statuts.map(s => `<option value="${s}">${s}</option>`).join('')}
+                    </select>
+                </div>
+                <div class="form-group-sm"><label>Corps</label>
+                    <select id="mes-corps" onchange="mesLoadRangs()"></select>
+                </div>
+            </div>
+            <div class="form-group-sm"><label>Position initiale (rang de titularisation)</label>
+                <select id="mes-rang" required></select>
+            </div>
+
+            <hr style="margin:16px 0;border:none;border-top:1px solid var(--border)">
+            <h3 style="font-size:14px;color:var(--navy);margin-bottom:12px">Services antérieurs (validation d'ancienneté)</h3>
+            <div id="mes-services"></div>
+            <button type="button" class="btn btn-outline btn-sm" onclick="mesAddService()" style="margin-bottom:16px">+ Ajouter un service antérieur</button>
+
+            <button type="submit" class="btn btn-primary btn-full" style="margin-top:8px">🎖️ Mettre en solde et calculer la carrière</button>
+        </form>
+    `);
+
+    // Si un agent est pré-sélectionné, charger son statut/corps
+    if (agentId) {
+        const opt = document.querySelector(`#mes-agent option[value="${agentId}"]`);
+        if (opt) {
+            document.getElementById('mes-statut').value = opt.dataset.statut;
+            await mesLoadCorps();
+            document.getElementById('mes-corps').value = opt.dataset.corps;
+            await mesLoadRangs();
+        }
+    } else {
+        mesLoadCorps();
+    }
+}
+
+function mesClearCorps() {
+    const sel = document.getElementById('mes-agent');
+    const opt = sel.options[sel.selectedIndex];
+    if (opt && opt.dataset.statut) {
+        document.getElementById('mes-statut').value = opt.dataset.statut;
+        mesLoadCorps().then(() => {
+            if (opt.dataset.corps) {
+                document.getElementById('mes-corps').value = opt.dataset.corps;
+                mesLoadRangs();
+            }
+        });
+    }
+}
+
+async function mesLoadCorps() {
+    const statut = document.getElementById('mes-statut').value;
+    const data = await api('GET', `/carriere/progression-grille?statut=${statut}`);
+    if (!data) return;
+    const corps = [...new Set(data.map(g => g.corps))];
+    document.getElementById('mes-corps').innerHTML = corps.map(c => `<option value="${c}">${c}</option>`).join('');
+    mesLoadRangs();
+}
+
+async function mesLoadRangs() {
+    const statut = document.getElementById('mes-statut').value;
+    const corps = document.getElementById('mes-corps').value;
+    if (!statut || !corps) return;
+    const data = await api('GET', `/carriere/rangs?statut=${statut}&corps=${corps}`);
+    if (!data) return;
+    document.getElementById('mes-rang').innerHTML = data.map(r =>
+        `<option value="${r.rang}">${r.classe} — éch.${r.echelon} (ind.${r.indice})</option>`
+    ).join('');
+}
+
+let mesServiceCount = 0;
+function mesAddService() {
+    const div = document.getElementById('mes-services');
+    const n = mesServiceCount++;
+    const row = document.createElement('div');
+    row.className = 'service-row';
+    row.id = `mes-svc-${n}`;
+    row.innerHTML = `
+        <div class="form-group-sm"><label>Type</label>
+            <select id="mes-svc-type-${n}">
+                <option value="volontaire">Volontaire</option>
+                <option value="contractuel">Contractuel</option>
+                <option value="auxiliaire">Auxiliaire</option>
+                <option value="stagiaire">Stagiaire</option>
+            </select>
+        </div>
+        <div class="form-group-sm"><label>Date début</label><input type="date" id="mes-svc-deb-${n}"></div>
+        <div class="form-group-sm"><label>Date fin</label><input type="date" id="mes-svc-fin-${n}"></div>
+        <div class="form-group-sm"><label>Durée (jours)</label><input type="number" id="mes-svc-jours-${n}" min="1" placeholder="Ex: 720"></div>
+        <button type="button" class="btn btn-danger btn-sm" onclick="document.getElementById('mes-svc-${n}').remove()">✕</button>
+    `;
+    div.appendChild(row);
+}
+
+async function executerMiseEnSolde(event) {
+    event.preventDefault();
+
+    const agentId = document.getElementById('mes-agent').value;
+    const dateTit = document.getElementById('mes-date').value;
+    const rangInit = parseInt(document.getElementById('mes-rang').value);
+
+    if (!agentId || !dateTit) { toast('Remplissez tous les champs', 'error'); return; }
+
+    // Collecter les services antérieurs
+    const services = [];
+    document.querySelectorAll('[id^="mes-svc-type-"]').forEach(sel => {
+        const n = sel.id.replace('mes-svc-type-', '');
+        const dateDebEl = document.getElementById(`mes-svc-deb-${n}`);
+        const dateFinEl = document.getElementById(`mes-svc-fin-${n}`);
+        const joursEl = document.getElementById(`mes-svc-jours-${n}`);
+        if (dateDebEl && dateFinEl && joursEl) {
+            const jours = parseInt(joursEl.value) || 0;
+            if (jours > 0) {
+                services.push({
+                    type_service: sel.value,
+                    date_debut: dateDebEl.value || dateTit,
+                    date_fin: dateFinEl.value || dateTit,
+                    duree_jours: jours,
+                });
+            }
+        }
+    });
+
+    const res = await api('POST', '/carriere/mise-en-solde', {
+        agent_id: parseInt(agentId),
+        date_titularisation: dateTit,
+        rang_initial: rangInit,
+        services_anterieurs: services,
+    });
+
+    if (res) {
+        toast(`Mise en solde effectuée — ${res.nb_etapes} étapes calculées`);
+        closeModal();
+        // Charger la carrière
+        document.getElementById('carr-matricule').value = res.carriere[0] ? '' : '';
+        // Charger via l'agent_id
+        const r = document.getElementById('carriere-result');
+        r.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+        const data = await api('GET', `/carriere/agent/${res.agent_id}`);
+        if (data) {
+            document.getElementById('carr-matricule').value = data.agent.matricule;
+            chargerCarriere();
+        }
+    }
 }
 
 /* ═══════════════════════════════════════════════════════════════

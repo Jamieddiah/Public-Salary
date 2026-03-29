@@ -206,6 +206,60 @@ def init_db(db_path=None):
         FOREIGN KEY (ministere_id) REFERENCES ministeres(id)
     );
 
+    -- ── Grille de progression (ordre d'avancement par corps) ──────────
+    CREATE TABLE IF NOT EXISTS progression_grille (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        statut TEXT NOT NULL,
+        corps TEXT NOT NULL,
+        hierarchie TEXT NOT NULL,
+        rang INTEGER NOT NULL,
+        classe TEXT NOT NULL,
+        echelon INTEGER NOT NULL,
+        indice INTEGER NOT NULL,
+        duree_jours INTEGER DEFAULT 720,
+        UNIQUE(statut, corps, rang)
+    );
+
+    -- ── Mise en solde (enregistrement initial de l'agent) ──────────────
+    CREATE TABLE IF NOT EXISTS mise_en_solde (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL UNIQUE,
+        date_titularisation TEXT NOT NULL,
+        rang_initial INTEGER NOT NULL,
+        classe_initiale TEXT NOT NULL,
+        echelon_initial INTEGER NOT NULL,
+        indice_initial INTEGER NOT NULL,
+        date_mise_en_solde TEXT DEFAULT (datetime('now')),
+        FOREIGN KEY (agent_id) REFERENCES agents(id)
+    );
+
+    -- ── Services antérieurs (pour validation) ──────────────────────────
+    CREATE TABLE IF NOT EXISTS validations_service (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        type_service TEXT NOT NULL,
+        date_debut TEXT NOT NULL,
+        date_fin TEXT NOT NULL,
+        duree_jours INTEGER NOT NULL,
+        FOREIGN KEY (agent_id) REFERENCES agents(id)
+    );
+
+    -- ── Carrière agent (tous les avancements calculés) ─────────────────
+    CREATE TABLE IF NOT EXISTS carriere_agent (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        agent_id INTEGER NOT NULL,
+        rang INTEGER NOT NULL,
+        classe TEXT NOT NULL,
+        echelon INTEGER NOT NULL,
+        indice INTEGER NOT NULL,
+        date_effet TEXT NOT NULL,
+        type_mouvement TEXT NOT NULL,
+        reference_acte TEXT,
+        traite INTEGER DEFAULT 0,
+        date_traitement TEXT,
+        FOREIGN KEY (agent_id) REFERENCES agents(id)
+    );
+
     -- ── Journal d'audit ────────────────────────────────────────────────
     CREATE TABLE IF NOT EXISTS journal_audit (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -371,6 +425,124 @@ def seed_data(conn):
     cur.executemany(
         "INSERT INTO grilles_indiciaires (statut, corps, grade, echelon, indice) VALUES (?, ?, ?, ?, ?)",
         grilles
+    )
+
+    # ══════════════════════════════════════════════════════════════════
+    # 5b. GRILLE DE PROGRESSION (ordre d'avancement par corps)
+    # ══════════════════════════════════════════════════════════════════
+    # Chaque ligne = un palier dans la carrière. rang = ordre croissant.
+    # duree_jours = 720 (2 ans de 360 jours) sauf cas particulier.
+    # Format classe : "4e classe", "3e classe", "2e classe", "1re classe", "Cl. exceptionnelle"
+    progressions = [
+        # ── Hiérarchie A — Administrateur Civil ───────────────────
+        ('titulaire', 'Administrateur Civil', 'A',  1, '4e classe', 1, 300, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  2, '4e classe', 2, 330, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  3, '4e classe', 3, 360, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  4, '3e classe', 1, 400, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  5, '3e classe', 2, 440, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  6, '3e classe', 3, 480, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  7, '2e classe', 1, 520, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  8, '2e classe', 2, 560, 720),
+        ('titulaire', 'Administrateur Civil', 'A',  9, '2e classe', 3, 600, 720),
+        ('titulaire', 'Administrateur Civil', 'A', 10, '1re classe', 1, 650, 720),
+        ('titulaire', 'Administrateur Civil', 'A', 11, '1re classe', 2, 700, 720),
+        ('titulaire', 'Administrateur Civil', 'A', 12, '1re classe', 3, 750, 720),
+        ('titulaire', 'Administrateur Civil', 'A', 13, 'Cl. exceptionnelle', 1, 800, 720),
+        ('titulaire', 'Administrateur Civil', 'A', 14, 'Cl. exceptionnelle', 2, 850, 0),
+
+        # ── Hiérarchie A — Médecin ────────────────────────────────
+        ('titulaire', 'Médecin', 'A',  1, '4e classe', 1, 450, 720),
+        ('titulaire', 'Médecin', 'A',  2, '4e classe', 2, 490, 720),
+        ('titulaire', 'Médecin', 'A',  3, '4e classe', 3, 530, 720),
+        ('titulaire', 'Médecin', 'A',  4, '3e classe', 1, 550, 720),
+        ('titulaire', 'Médecin', 'A',  5, '3e classe', 2, 600, 720),
+        ('titulaire', 'Médecin', 'A',  6, '3e classe', 3, 650, 720),
+        ('titulaire', 'Médecin', 'A',  7, '2e classe', 1, 700, 720),
+        ('titulaire', 'Médecin', 'A',  8, '2e classe', 2, 750, 720),
+        ('titulaire', 'Médecin', 'A',  9, '2e classe', 3, 800, 720),
+        ('titulaire', 'Médecin', 'A', 10, '1re classe', 1, 850, 720),
+        ('titulaire', 'Médecin', 'A', 11, '1re classe', 2, 900, 720),
+        ('titulaire', 'Médecin', 'A', 12, '1re classe', 3, 950, 0),
+
+        # ── Hiérarchie B — Instituteur ────────────────────────────
+        ('titulaire', 'Instituteur', 'B',  1, '4e classe', 1, 200, 720),
+        ('titulaire', 'Instituteur', 'B',  2, '4e classe', 2, 220, 720),
+        ('titulaire', 'Instituteur', 'B',  3, '4e classe', 3, 240, 720),
+        ('titulaire', 'Instituteur', 'B',  4, '3e classe', 1, 250, 720),
+        ('titulaire', 'Instituteur', 'B',  5, '3e classe', 2, 275, 720),
+        ('titulaire', 'Instituteur', 'B',  6, '3e classe', 3, 300, 720),
+        ('titulaire', 'Instituteur', 'B',  7, '2e classe', 1, 330, 720),
+        ('titulaire', 'Instituteur', 'B',  8, '2e classe', 2, 360, 720),
+        ('titulaire', 'Instituteur', 'B',  9, '2e classe', 3, 390, 720),
+        ('titulaire', 'Instituteur', 'B', 10, '1re classe', 1, 420, 720),
+        ('titulaire', 'Instituteur', 'B', 11, '1re classe', 2, 450, 720),
+        ('titulaire', 'Instituteur', 'B', 12, '1re classe', 3, 480, 0),
+
+        # ── Hiérarchie C — Agent Administratif ────────────────────
+        ('titulaire', 'Agent Administratif', 'C',  1, '4e classe', 1, 150, 720),
+        ('titulaire', 'Agent Administratif', 'C',  2, '4e classe', 2, 165, 720),
+        ('titulaire', 'Agent Administratif', 'C',  3, '4e classe', 3, 180, 720),
+        ('titulaire', 'Agent Administratif', 'C',  4, '3e classe', 1, 195, 720),
+        ('titulaire', 'Agent Administratif', 'C',  5, '3e classe', 2, 210, 720),
+        ('titulaire', 'Agent Administratif', 'C',  6, '3e classe', 3, 225, 720),
+        ('titulaire', 'Agent Administratif', 'C',  7, '2e classe', 1, 240, 720),
+        ('titulaire', 'Agent Administratif', 'C',  8, '2e classe', 2, 260, 720),
+        ('titulaire', 'Agent Administratif', 'C',  9, '2e classe', 3, 280, 720),
+        ('titulaire', 'Agent Administratif', 'C', 10, '1re classe', 1, 300, 720),
+        ('titulaire', 'Agent Administratif', 'C', 11, '1re classe', 2, 320, 720),
+        ('titulaire', 'Agent Administratif', 'C', 12, '1re classe', 3, 340, 0),
+
+        # ── Contractuels ──────────────────────────────────────────
+        ('contractuel', 'Contractuel', 'B',  1, 'Catégorie III', 1, 200, 720),
+        ('contractuel', 'Contractuel', 'B',  2, 'Catégorie III', 2, 220, 720),
+        ('contractuel', 'Contractuel', 'B',  3, 'Catégorie II',  1, 280, 720),
+        ('contractuel', 'Contractuel', 'B',  4, 'Catégorie II',  2, 310, 720),
+        ('contractuel', 'Contractuel', 'B',  5, 'Catégorie I',   1, 350, 720),
+        ('contractuel', 'Contractuel', 'B',  6, 'Catégorie I',   2, 380, 0),
+
+        # ── Militaire — Officier ──────────────────────────────────
+        ('militaire', 'Officier', 'A',  1, 'Lieutenant', 1, 340, 720),
+        ('militaire', 'Officier', 'A',  2, 'Lieutenant', 2, 360, 720),
+        ('militaire', 'Officier', 'A',  3, 'Capitaine',  1, 400, 720),
+        ('militaire', 'Officier', 'A',  4, 'Capitaine',  2, 430, 720),
+        ('militaire', 'Officier', 'A',  5, 'Colonel',    1, 600, 720),
+        ('militaire', 'Officier', 'A',  6, 'Colonel',    2, 640, 0),
+
+        # ── Militaire — Sous-Officier ─────────────────────────────
+        ('militaire', 'Sous-Officier', 'B',  1, 'Sergent',  1, 200, 720),
+        ('militaire', 'Sous-Officier', 'B',  2, 'Sergent',  2, 215, 720),
+        ('militaire', 'Sous-Officier', 'B',  3, 'Adjudant', 1, 250, 720),
+        ('militaire', 'Sous-Officier', 'B',  4, 'Adjudant', 2, 270, 0),
+
+        # ── Gendarmerie — Officier ────────────────────────────────
+        ('gendarmerie', 'Officier', 'A',  1, 'Capitaine', 1, 410, 720),
+        ('gendarmerie', 'Officier', 'A',  2, 'Capitaine', 2, 440, 720),
+        ('gendarmerie', 'Officier', 'A',  3, 'Colonel',   1, 620, 720),
+        ('gendarmerie', 'Officier', 'A',  4, 'Colonel',   2, 660, 0),
+
+        # ── Gendarmerie — Sous-Officier ───────────────────────────
+        ('gendarmerie', 'Sous-Officier', 'B',  1, 'Gendarme', 1, 180, 720),
+        ('gendarmerie', 'Sous-Officier', 'B',  2, 'Gendarme', 2, 195, 720),
+        ('gendarmerie', 'Sous-Officier', 'B',  3, 'Adjudant', 1, 260, 720),
+        ('gendarmerie', 'Sous-Officier', 'B',  4, 'Adjudant', 2, 280, 0),
+
+        # ── Police — Officier ─────────────────────────────────────
+        ('police', 'Officier', 'A',  1, 'Inspecteur',  1, 320, 720),
+        ('police', 'Officier', 'A',  2, 'Inspecteur',  2, 345, 720),
+        ('police', 'Officier', 'A',  3, 'Commissaire', 1, 430, 720),
+        ('police', 'Officier', 'A',  4, 'Commissaire', 2, 460, 0),
+
+        # ── Police — Sous-Officier ────────────────────────────────
+        ('police', 'Sous-Officier', 'B',  1, 'Gardien de la Paix', 1, 180, 720),
+        ('police', 'Sous-Officier', 'B',  2, 'Gardien de la Paix', 2, 195, 720),
+        ('police', 'Sous-Officier', 'B',  3, 'Brigadier',          1, 220, 720),
+        ('police', 'Sous-Officier', 'B',  4, 'Brigadier',          2, 240, 0),
+    ]
+    cur.executemany(
+        """INSERT INTO progression_grille
+           (statut, corps, hierarchie, rang, classe, echelon, indice, duree_jours)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        progressions
     )
 
     # ══════════════════════════════════════════════════════════════════

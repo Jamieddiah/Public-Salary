@@ -223,6 +223,27 @@ class SIRHHandler(http.server.SimpleHTTPRequestHandler):
             if path == '/api/rapport/masse-salariale' and method == 'GET':
                 return self.api_rapport_masse_salariale(user)
 
+            # Carrière / Avancement / Validation
+            if path == '/api/carriere/progression-grille' and method == 'GET':
+                return self.api_progression_grille(user)
+            if path == '/api/carriere/rangs' and method == 'GET':
+                return self.api_rangs_par_corps(user)
+            if path == '/api/carriere/mise-en-solde' and method == 'POST':
+                return self.api_mise_en_solde(user)
+            if path.startswith('/api/carriere/agent/') and method == 'GET':
+                # /api/carriere/agent/<id> ou /api/carriere/agent/matricule/<mat>
+                parts = path.split('/')
+                if 'matricule' in parts:
+                    matricule = parts[-1]
+                    return self.api_carriere_par_matricule(user, matricule)
+                else:
+                    aid = int(parts[-1])
+                    return self.api_carriere_agent(user, aid)
+            if path == '/api/carriere/traiter' and method == 'POST':
+                return self.api_traiter_avancement(user)
+            if path == '/api/carriere/traiter-batch' and method == 'POST':
+                return self.api_traiter_batch(user)
+
             self.send_error_json(404, f'Route non trouvée: {method} {path}')
 
         except ValueError as e:
@@ -843,6 +864,118 @@ class SIRHHandler(http.server.SimpleHTTPRequestHandler):
 
         from database.moteur_paie import rapport_masse_salariale
         result = rapport_masse_salariale(DB_PATH, periode, niveau)
+        self.send_json(result)
+
+    # ════════════════════════════════════════════════════════════════
+    # CARRIÈRE / AVANCEMENT / VALIDATION
+    # ════════════════════════════════════════════════════════════════
+
+    def api_progression_grille(self, user):
+        """Récupérer la grille de progression complète ou filtrée."""
+        params = self.get_query_params()
+        conn = get_db()
+        where = []
+        args = []
+        if params.get('statut'):
+            where.append("statut = ?")
+            args.append(params['statut'])
+        if params.get('corps'):
+            where.append("corps = ?")
+            args.append(params['corps'])
+        clause = f"WHERE {' AND '.join(where)}" if where else ""
+        rows = conn.execute(
+            f"SELECT * FROM progression_grille {clause} ORDER BY statut, corps, rang", args
+        ).fetchall()
+        conn.close()
+        self.send_json([dict(r) for r in rows])
+
+    def api_rangs_par_corps(self, user):
+        """Récupérer les rangs pour un statut/corps (formulaire mise en solde)."""
+        params = self.get_query_params()
+        statut = params.get('statut', '')
+        corps = params.get('corps', '')
+        from database.avancement import get_rangs_par_corps
+        rangs = get_rangs_par_corps(DB_PATH, statut, corps)
+        self.send_json(rangs)
+
+    def api_mise_en_solde(self, user):
+        """Mettre un agent en solde avec validation optionnelle."""
+        if user['role'] in ('controleur', 'auditeur'):
+            return self.send_error_json(403, 'Permission insuffisante')
+
+        body = self.read_body()
+        agent_id = body.get('agent_id')
+        date_titularisation = body.get('date_titularisation')
+        rang_initial = int(body.get('rang_initial', 1))
+        services_anterieurs = body.get('services_anterieurs', [])
+
+        if not agent_id or not date_titularisation:
+            return self.send_error_json(400, 'agent_id et date_titularisation requis')
+
+        from database.avancement import mise_en_solde
+        result = mise_en_solde(DB_PATH, int(agent_id), date_titularisation,
+                               rang_initial, services_anterieurs)
+
+        if 'error' in result:
+            return self.send_error_json(400, result['error'])
+
+        audit_log(user['id'], 'MISE_EN_SOLDE', 'agents', agent_id,
+                  f"Titularisation {date_titularisation}, validation {result.get('annees_validation',0)} ans")
+        self.send_json(result)
+
+    def api_carriere_agent(self, user, agent_id):
+        """Récupérer la carrière complète d'un agent."""
+        from database.avancement import get_carriere_agent
+        result = get_carriere_agent(DB_PATH, agent_id)
+        if 'error' in result and result['error'] == 'Agent non trouvé':
+            return self.send_error_json(404, result['error'])
+        self.send_json(result)
+
+    def api_carriere_par_matricule(self, user, matricule):
+        """Récupérer la carrière par matricule."""
+        from database.avancement import get_carriere_par_matricule
+        result = get_carriere_par_matricule(DB_PATH, matricule)
+        if 'error' in result:
+            return self.send_error_json(404, result['error'])
+        self.send_json(result)
+
+    def api_traiter_avancement(self, user):
+        """Traiter un avancement individuel."""
+        if user['role'] in ('auditeur',):
+            return self.send_error_json(403, 'Permission insuffisante')
+
+        body = self.read_body()
+        carriere_id = body.get('carriere_id')
+        reference_acte = body.get('reference_acte', '')
+
+        if not carriere_id:
+            return self.send_error_json(400, 'carriere_id requis')
+
+        from database.avancement import traiter_avancement
+        result = traiter_avancement(DB_PATH, int(carriere_id), reference_acte)
+
+        if 'error' in result:
+            return self.send_error_json(400, result['error'])
+
+        audit_log(user['id'], 'TRAITER_AVANCEMENT', 'carriere_agent', carriere_id, reference_acte)
+        self.send_json(result)
+
+    def api_traiter_batch(self, user):
+        """Traiter plusieurs avancements d'un coup."""
+        if user['role'] in ('auditeur',):
+            return self.send_error_json(403, 'Permission insuffisante')
+
+        body = self.read_body()
+        traitements = body.get('traitements', [])
+
+        from database.avancement import traiter_batch_avancements
+        result = traiter_batch_avancements(DB_PATH, traitements=traitements)
+
+        if 'error' in result:
+            return self.send_error_json(400, result['error'])
+
+        audit_log(user['id'], 'TRAITER_BATCH_AVANCEMENT', 'carriere_agent', None,
+                  f"{result.get('total_traites', 0)} traités")
         self.send_json(result)
 
 
